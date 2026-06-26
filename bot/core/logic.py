@@ -1,0 +1,72 @@
+# --- START OF FILE logic.py ---
+
+import os
+import json
+import asyncio
+from bot.packets import team_packets
+
+TEAM_JSON_FILE = 'config/Team.json'
+
+async def manage_team_file(bot, action, t_uid=None):
+    if not os.path.exists('config'): 
+        os.makedirs('config')
+        
+    try:
+        with open(TEAM_JSON_FILE, 'r', encoding='utf-8') as f: 
+            data = json.load(f)
+    except Exception: 
+        data = {}
+
+    bot_uid = getattr(bot, 'my_uid', None)
+    bot_key = str(bot_uid) if bot_uid else getattr(bot, 'bot_name', 'UnknownBot')
+    
+    if action == "sync_full_team" and t_uid is not None:
+        valid_uids = [str(u) for u in t_uid if str(u).isdigit()]
+        data[bot_key] = valid_uids
+
+    elif action == "clear":
+        data[bot_key] = []
+
+    elif action == "add_member" and t_uid and str(t_uid).isdigit():
+        if bot_key not in data: data[bot_key] = []
+        if str(t_uid) not in data[bot_key]: data[bot_key].append(str(t_uid))
+        
+    elif action == "remove_member" and t_uid and str(t_uid).isdigit():
+        if bot_key in data and str(t_uid) in data[bot_key]:
+            data[bot_key].remove(str(t_uid))
+            
+    elif action == "set_leader" and t_uid:
+        pass 
+
+    try:
+        with open(TEAM_JSON_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving team: {e}")
+
+async def execute_solo_logic(bot):
+    from bot.core.manager import send_online_packet 
+    
+    if getattr(bot, 'is_magic_mode', False):
+        bot.is_magic_mode = False
+        
+    # 🟢 Auto Unlock when bot goes solo
+    bot.is_locked = False
+    
+    if bot.is_in_team:
+        leave_pkt = await team_packets.create_leave_team_packet(bot.my_uid, bot.key, bot.iv)
+        await send_online_packet(bot, leave_pkt)
+        bot.is_in_team = False
+    
+    await asyncio.sleep(0.5)
+    await bot._close_chat_connection()   
+    
+    bot.team_chat_authed = False
+    bot.current_chat_code = None
+    bot.current_chat_owner = None
+    bot.team_uids = []
+    
+    await manage_team_file(bot, "clear")
+    print(f"[{bot.bot_name}] 🔄 Execute Solo: Left Team & Chat connection closed.")
+
+# --- END OF FILE logic.py ---
