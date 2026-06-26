@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# utils/api_client.py - Native Garena API Wrapper (No 3rd Party Dependency)
+# utils/api_client.py - Native Garena API Wrapper (Fixed NameError & Circular References)
 
 import os
 import sys
@@ -15,8 +15,8 @@ if BASE_DIR not in sys.path:
 
 import garena_api as bot_module
 
-async def get_active_token():
-    """ডাটাবেজে যুক্ত সক্রিয় বটগুলোর মধ্য থেকে যেকোনো একটির সেশন টোকেন রিট্রিভ করার মেথড"""
+async def retrieve_active_bot_token():
+    """ডাটাবেজে যুক্ত সক্রিয় বটগুলোর মধ্য থেকে যেকোনো একটির সেশন টোকেন রিট্রিভ করার মেথড (Fixed Shadowing)"""
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     cursor = conn.cursor()
@@ -42,7 +42,7 @@ async def get_active_token():
     return None
 
 def map_garena_to_info_format(res):
-    """garena_api এর রেসপন্স ডাটাকে actions_info.py এর উপযোগী ফরম্যাটে রূপান্তর করার ম্যাপার"""
+    """garena_api এর রেসপন্স ডাটাকে actions_info.py এর উপযোগী ফরম্যাটে রূপান্তর করার ম্যাপার (Fixed NameError)"""
     if not res or not res.get("success"):
         return None
         
@@ -61,6 +61,7 @@ def map_garena_to_info_format(res):
     captain = safe_get_dict(json_data, 8)
     social = safe_get_dict(json_data, 9)
 
+    # 🟢 FIXED: Removed self-referential 'b_info' and 'b' calls to prevent NameError/Circular Crashes
     basic_info = {
         "nickname": basic.get("3") or res.get("nickname") or "Unknown",
         "accountId": str(basic.get("1") or res.get("uid") or "0"),
@@ -68,13 +69,11 @@ def map_garena_to_info_format(res):
         "level": int(basic.get("6") or res.get("level") or 0),
         "exp": int(basic.get("7") or 0),
         "liked": int(basic.get("21") or res.get("likes") or 0),
-        "createAt": b_info.get("createAt") if 'b_info' in locals() else b_info.get("create_at") if 'b_info' in locals() else str(basic_info.get("44", 0)) if (basic_info and "44" in basic_info) else "0",
-        "lastLoginAt": str(b.get("lastLoginAt") or b.get("last_login_at", 0)) if 'b' in locals() else "0"
+        "createAt": str(basic.get("44") or res.get("created_at") or "0"),
+        "create_at": str(basic.get("44") or res.get("created_at") or "0"),
+        "lastLoginAt": str(basic.get("24") or res.get("last_login") or "0"),
+        "last_login_at": str(basic.get("24") or res.get("last_login") or "0")
     }
-    
-    # basicInfo সাব-স্ট্রাকচার ওভাররাইডার
-    basic_info["createAt"] = str(basic.get("44") or res.get("created_at") or "0")
-    basic_info["lastLoginAt"] = str(basic.get("24") or res.get("last_login") or "0")
 
     credit_info = {
         "creditScore": int(credit.get("1") or 100),
@@ -126,7 +125,7 @@ async def fetch_player_info(uid, retries=3):
     if not uid:
         return None
         
-    token = await get_active_token()
+    token = await retrieve_active_bot_token()
     if not token:
         print("[API Client Error] No active Garena Token found in database. Cannot scan player.")
         return None
