@@ -14,10 +14,10 @@ urllib3==2.0.7
 httpx==0.26.0
 certifi==2024.2.2
 
-# Cryptography, Protobuf & Security
+# Cryptography, Protobuf & Security (UPDATED FOR COMPILATION COMPATIBILITY)
 PyJWT==2.8.0
 pycryptodome==3.19.0
-protobuf==4.25.1
+protobuf>=5.26.1
 protobuf-decoder==0.4.0
 
 # System & Terminal Monitoring
