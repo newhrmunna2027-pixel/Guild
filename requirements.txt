@@ -1,16 +1,38 @@
+# Web Framework & Core Routing
 Flask==3.0.2
 Flask-Cors==4.0.0
+
+# Asynchronous Connections & Databases
+aiohttp==3.9.3
 aiosqlite==0.20.0
 pymongo==4.6.1
+dnspython==2.6.1
+
+# HTTP Clients & Utilities
 requests==2.31.0
 urllib3==2.0.7
-psutil==5.9.8
-PyJWT==2.8.0
-colorama==0.4.6
-pycryptodome==3.19.0
 httpx==0.26.0
-google-api-python-client==2.116.0
+certifi==2024.2.2
+
+# Cryptography & Security
+PyJWT==2.8.0
+pycryptodome==3.19.0
+protobuf==4.25.1
+
+# System & Terminal Monitoring
+psutil==5.9.8
+colorama==0.4.6
+
+# Performance & Speed (Conditional for Linux platforms)
+uvloop==0.19.0; sys_platform != 'win32'
+
+# Date, Time & Optimization Tools
 pytz==2024.1
 cachetools==5.3.2
+
+# Text Matching & Levenshtein Algorithms
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.23.0
+
+# Garena Integrations
+google-api-python-client==2.116.0
