@@ -8,6 +8,8 @@ import requests
 import jwt
 import urllib3
 import secrets
+import hmac       # <--- এই নতুন লাইনটি যুক্ত করুন
+import hashlib    # <--- এই নতুন লাইনটি যুক্ত করুন
 from datetime import datetime
 from bot_core import *
 
