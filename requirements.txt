@@ -1,4 +1,8 @@
 aiohttp
+google-api-python-client
+uvloop
+python-Levenshtein
+dnspython
 aiosqlite
 Flask[async]
 flask-cors
