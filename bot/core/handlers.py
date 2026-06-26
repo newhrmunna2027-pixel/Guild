@@ -142,7 +142,7 @@ async def start_room_chat_auth_sequence(bot, room_id, secret_code):
         
         # প্রথম স্বাগতম বার্তা পাঠানো
         print(f"[{bot.bot_name}] [🔄 ROOM AUTH] Sending Welcome message to room chat channel...")
-        welcome_pkt = await team_packets.send_captured_room_msg("RIZER Lobby Bot Online & Ready!", room_id, bot.key, bot.iv)
+        welcome_pkt = await team_packets.send_captured_room_msg("GET Ready! Its Show Time\n Mo✅ther ✅f✅u✅c✅ker ", room_id, bot.key, bot.iv)
         bot.chat_writer.write(welcome_pkt)
         await bot.chat_writer.drain()
         print(f"[{bot.bot_name}] [✅ ROOM AUTH SUCCESS] Welcome message sent to Room {room_id}!")
