@@ -53,7 +53,7 @@ async def execute_solo_logic(bot):
         bot.is_magic_mode = False
         
     bot.is_locked = False
-    bot.ignore_auto_solo = False # 🟢 বট সোলো হওয়ার সাথে সাথে ফ্ল্যাগটি রিসেট হবে
+    bot.ignore_auto_solo = False 
     
     if bot.is_in_team:
         leave_pkt = await team_packets.create_leave_team_packet(bot.my_uid, bot.key, bot.iv)
@@ -68,7 +68,6 @@ async def execute_solo_logic(bot):
     bot.current_chat_owner = None
     bot.team_uids = []
     
-    # 🟢 কাস্টম রুমের সেভ করা ডাটা ও সেশন ক্লিয়ার করে দিবে
     try:
         delete_bot_room_state(bot.my_uid)
         bot.room_id = None
@@ -93,11 +92,9 @@ def load_saved_guild_members(bot_uid):
     except:
         return []
 
-async def update_guild_members_list(bot):
-    """১০ মিনিট পর পর বা স্টার্টআপে গ্যারেনা থেকে গিল্ড মেম্বারদের রিয়েল-টাইম ডাটা এনে ফাইলে সেভ করার ফাংশন"""
-    if not bot.guild_id or str(bot.guild_id) in ["0", "N/A", "None"]:
-        return
-        
+# 🟢 নতুন On-Demand API Sync Logic
+async def fetch_and_sync_all_lists(bot):
+    """শুধুমাত্র ইনভাইট পেলে এবং লিস্টে নাম না থাকলেই এই ফাংশনটি কল হবে"""
     try:
         import garena_api as bot_module
         
@@ -105,71 +102,49 @@ async def update_guild_members_list(bot):
         token, err = bot_module.get_active_token(config_name)
         
         if err or not token:
-            print(f"[{bot.bot_name}] Sync Failed: Garena Token unavailable for session '{config_name}'.")
+            print(f"[{bot.bot_name}] ⚠️ On-Demand Sync Failed: Token unavailable.")
             return
             
         loop = asyncio.get_running_loop()
-        res = await loop.run_in_executor(None, bot_module.get_guild_member_list, token, str(bot.guild_id))
         
-        if res.get("success"):
-            all_uids = []
-            if res.get("leader") and "uid" in res["leader"]:
-                all_uids.append(str(res["leader"]["uid"]))
-            if res.get("acting_leader") and "uid" in res["acting_leader"]:
-                all_uids.append(str(res["acting_leader"]["uid"]))
-            for officer in res.get("officers", []):
-                if "uid" in officer:
-                    all_uids.append(str(officer["uid"]))
-            for member in res.get("members", []):
-                if "uid" in member:
-                    all_uids.append(str(member["uid"]))
-                    
-            file_dir = os.path.join('config', 'guild_members')
-            os.makedirs(file_dir, exist_ok=True)
-            
-            uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
-            file_path = os.path.join(file_dir, f"{uid_str}.json")
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump({"members": all_uids}, f, indent=4)
-                
-            print(f"[{bot.bot_name}] ✅ Successfully saved {len(all_uids)} guild members.")
-        else:
-            print(f"[{bot.bot_name}] ⚠️ Guild Sync Response Failed: {res.get('message', 'Unknown Error')}")
-            
-    except Exception as e:
-        print(f"[{bot.bot_name}] ❌ Error updating guild members: {e}")
-
-async def sync_friends_to_admins_bot_logic(bot):
-    """বট লগইন হওয়ার পর ফ্রেন্ডলিস্ট এনে সরাসরি অ্যাডমিন ফাইলে সেভ করার ফাংশন"""
-    try:
-        import garena_api as bot_module
-        
-        config_name = getattr(bot, 'bot_display_name_from_manager', bot.bot_name)
-        token, err = bot_module.get_active_token(config_name)
-        
-        if err or not token:
-            print(f"[{bot.bot_name}] Sync Failed: Token unavailable for friends sync.")
-            return
-            
-        loop = asyncio.get_running_loop()
-        res = await loop.run_in_executor(None, bot_module.get_active_friend_list, token)
-        
-        if res.get("success"):
-            friend_uids = [str(f["uid"]) for f in res["friends"] if str(f["uid"]) != str(bot.my_uid)]
+        # 1. Sync Friends to Admins File
+        res_friends = await loop.run_in_executor(None, bot_module.get_active_friend_list, token)
+        if res_friends.get("success"):
+            friend_uids = [str(f["uid"]) for f in res_friends["friends"] if str(f["uid"]) != str(bot.my_uid)]
             
             dir_path = os.path.join('config', 'admins')
             os.makedirs(dir_path, exist_ok=True)
-            
             uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
             file_path = os.path.join(dir_path, f"{uid_str}.json")
             
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump({"Admins": friend_uids}, f, indent=4)
+            print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(friend_uids)} Friends.")
+
+        # 2. Sync Guild Members
+        if bot.guild_id and str(bot.guild_id) not in ["0", "N/A", "None"]:
+            res_guild = await loop.run_in_executor(None, bot_module.get_guild_member_list, token, str(bot.guild_id))
+            if res_guild.get("success"):
+                all_uids = []
+                if res_guild.get("leader") and "uid" in res_guild["leader"]:
+                    all_uids.append(str(res_guild["leader"]["uid"]))
+                if res_guild.get("acting_leader") and "uid" in res_guild["acting_leader"]:
+                    all_uids.append(str(res_guild["acting_leader"]["uid"]))
+                for officer in res_guild.get("officers", []):
+                    if "uid" in officer:
+                        all_uids.append(str(officer["uid"]))
+                for member in res_guild.get("members", []):
+                    if "uid" in member:
+                        all_uids.append(str(member["uid"]))
+                        
+                file_dir = os.path.join('config', 'guild_members')
+                os.makedirs(file_dir, exist_ok=True)
+                uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
+                file_path = os.path.join(file_dir, f"{uid_str}.json")
                 
-            print(f"[{bot.bot_name}] ✅ Auto-Synced {len(friend_uids)} Friends to Admin list.")
-        else:
-            print(f"[{bot.bot_name}] ⚠️ Friends Sync Failed: {res.get('message', 'Unknown Error')}")
-            
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump({"members": all_uids}, f, indent=4)
+                print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(all_uids)} Guild members.")
+
     except Exception as e:
-        print(f"[{bot.bot_name}] ❌ Error updating friends to admins: {e}")
+        print(f"[{bot.bot_name}] ❌ Error during on-demand sync: {e}")
