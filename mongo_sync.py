@@ -63,7 +63,7 @@ col_guild_members = None
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
     client.admin.command('ping')
-    db_mongo = client['Esports_Bot_Panel_2']
+    db_mongo = client['Esports_Bot_Panel']
     col_system = db_mongo['system_configs']  
     col_accounts = db_mongo['bot_accounts']  
     col_admins = db_mongo['bot_admins']
