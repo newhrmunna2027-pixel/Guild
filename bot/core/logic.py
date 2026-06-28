@@ -92,27 +92,38 @@ def load_saved_guild_members(bot_uid):
     except:
         return []
 
-import threading # ফাইলের উপরে এটি যুক্ত আছে ধরে নিলাম
-
-# 🟢 নতুন On-Demand API Sync Logic
+# 🟢 BULLETPROOF ON-DEMAND API SYNC LOGIC
 async def fetch_and_sync_all_lists(bot):
     """শুধুমাত্র ইনভাইট পেলে এবং লিস্টে নাম না থাকলেই এই ফাংশনটি কল হবে"""
     try:
+        print(f"[{bot.bot_name}] 🔄 Starting API Sync...")
+        import sys
+        
+        # ডিরেক্টরি ক্র্যাশ এড়াতে পাথ ফিক্সিং
+        BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if BASE_DIR not in sys.path:
+            sys.path.append(BASE_DIR)
+            
         import garena_api as bot_module
         
         config_name = getattr(bot, 'bot_display_name_from_manager', bot.bot_name)
-        token, err = bot_module.get_active_token(config_name)
-        
-        if err or not token:
-            print(f"[{bot.bot_name}] ⚠️ On-Demand Sync Failed: Token unavailable.")
-            return
-            
         loop = asyncio.get_running_loop()
         
+        # 0. Fetch Token safely inside executor
+        print(f"[{bot.bot_name}] 🔑 Fetching Session Token...")
+        token_res = await loop.run_in_executor(None, bot_module.get_active_token, config_name)
+        token = token_res[0]
+        err = token_res[1]
+        
+        if err or not token:
+            print(f"[{bot.bot_name}] ⚠️ On-Demand Sync Failed: Token unavailable. ({err})")
+            return
+            
         # 1. Sync Friends to Admins File
+        print(f"[{bot.bot_name}] 📡 Requesting Friends List from Garena...")
         res_friends = await loop.run_in_executor(None, bot_module.get_active_friend_list, token)
         if res_friends.get("success"):
-            friend_uids = [str(f["uid"]) for f in res_friends["friends"] if str(f["uid"]) != str(bot.my_uid)]
+            friend_uids = [str(f["uid"]) for f in res_friends.get("friends", []) if str(f["uid"]) != str(bot.my_uid)]
             
             dir_path = os.path.join('config', 'admins')
             os.makedirs(dir_path, exist_ok=True)
@@ -121,17 +132,21 @@ async def fetch_and_sync_all_lists(bot):
             
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump({"Admins": friend_uids}, f, indent=4)
-            print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(friend_uids)} Friends.")
+            print(f"[{bot.bot_name}] ✅ Fetched and Saved {len(friend_uids)} Friends to Admin List.")
             
-            # 🟢 Cloud Mongo Sync for Admins (Background)
+            # Cloud Mongo Sync for Admins (Background)
             try:
                 import mongo_sync
+                import threading
                 admin_data = {"Bot_Name": bot.bot_name, "Guild_ID": str(bot.guild_id), "Admins": friend_uids}
                 threading.Thread(target=mongo_sync.push_admin_to_mongo, args=(bot.bot_name, admin_data)).start()
             except Exception: pass
+        else:
+            print(f"[{bot.bot_name}] ⚠️ Friends API Error: {res_friends.get('message')}")
 
         # 2. Sync Guild Members
         if bot.guild_id and str(bot.guild_id) not in ["0", "N/A", "None"]:
+            print(f"[{bot.bot_name}] 📡 Requesting Guild Members from Garena...")
             res_guild = await loop.run_in_executor(None, bot_module.get_guild_member_list, token, str(bot.guild_id))
             if res_guild.get("success"):
                 all_uids = []
@@ -148,18 +163,22 @@ async def fetch_and_sync_all_lists(bot):
                         
                 file_dir = os.path.join('config', 'guild_members')
                 os.makedirs(file_dir, exist_ok=True)
-                uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
                 file_path = os.path.join(file_dir, f"{uid_str}.json")
                 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump({"members": all_uids}, f, indent=4)
-                print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(all_uids)} Guild members.")
+                print(f"[{bot.bot_name}] ✅ Fetched and Saved {len(all_uids)} Guild members.")
                 
-                # 🟢 Cloud Mongo Sync for Guild Members (Background)
+                # Cloud Mongo Sync for Guild Members (Background)
                 try:
                     import mongo_sync
+                    import threading
                     threading.Thread(target=mongo_sync.push_guild_members_to_mongo, args=(bot.bot_name, bot.my_uid, str(bot.guild_id), all_uids)).start()
                 except Exception: pass
+            else:
+                print(f"[{bot.bot_name}] ⚠️ Guild API Error: {res_guild.get('message')}")
 
     except Exception as e:
         print(f"[{bot.bot_name}] ❌ Error during on-demand sync: {e}")
+        import traceback
+        traceback.print_exc()
