@@ -87,6 +87,8 @@ async def _create_team(client, ctx, team_capacity):
     commander_uid = ctx.get('uid')
     if not commander_uid: return
 
+    client.ignore_auto_solo = True
+
     # 🟢 প্রসেস ফাস্ট করতে execute_solo_logic এর ডিলে ১.৫ সেকেন্ড কমিয়ে ০.৩ সেকেন্ড করা হয়েছে
     if client.is_in_team or getattr(client, 'is_magic_mode', False):
         await execute_solo_logic(client) 
