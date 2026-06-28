@@ -876,9 +876,10 @@ async def _create_team(client, ctx, team_capacity):
 
     # 🟢 Background task to automatically execute solo leave after exactly 5 seconds
     async def delayed_auto_solo():
-        await asyncio.sleep(5.0) # 5 seconds delay
-        if client.is_in_team:
-            print(f"[{client.bot_name}] 🔄 Auto-Solo: Leaving created team lobby automatically...")
-            await execute_solo_logic(client)
+            await asyncio.sleep(5.0) # 5 seconds delay
+            if client.is_in_team:
+                print(f"[{client.bot_name}] 🔄 Auto-Solo: Leaving created team lobby automatically...")
+                await execute_solo_logic(client)
+            client.ignore_auto_solo = False # 🟢 ৫ সেকেন্ড পর সোলো যাওয়া সম্পন্ন হলে ফ্ল্যাগটি রিসেট হবে
             
     asyncio.create_task(delayed_auto_solo())
