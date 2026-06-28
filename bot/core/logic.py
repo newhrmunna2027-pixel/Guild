@@ -53,6 +53,7 @@ async def execute_solo_logic(bot):
         bot.is_magic_mode = False
         
     bot.is_locked = False
+    bot.ignore_auto_solo = False 
     
     if bot.is_in_team:
         leave_pkt = await team_packets.create_leave_team_packet(bot.my_uid, bot.key, bot.iv)
