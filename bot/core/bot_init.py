@@ -38,6 +38,7 @@ def init_bot_state(bot, config, session_data):
     bot.last_invite_leader = None
     bot.last_invite_code = None
     bot.last_lobby_session_id = None 
+    bot.ignore_auto_solo = False
     
     # 🟢 রুম সেশন স্টেট ভ্যারিয়েবল ইনিশিয়ালাইজেশন
     bot.room_id = None
