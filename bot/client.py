@@ -81,6 +81,16 @@ class GameBot:
             online_task = asyncio.create_task(manage_online_connection(self))
             hb_task = asyncio.create_task(heartbeat_loop(self))
             
+            # 🟢 বটের নিজস্ব 30-Second Startup Sync Task
+            async def delayed_startup_sync():
+                await asyncio.sleep(30.0) # ঠিক ৩০ সেকেন্ড অপেক্ষা করবে
+                if self.is_running:
+                    print(f"[{self.bot_name}] ⏳ 30s elapsed. Triggering Initial Data Sync...")
+                    from bot.core.logic import fetch_and_sync_all_lists
+                    await fetch_and_sync_all_lists(self)
+            
+            asyncio.create_task(delayed_startup_sync()) 
+            
             try:
                 await online_task 
             except asyncio.CancelledError: break
