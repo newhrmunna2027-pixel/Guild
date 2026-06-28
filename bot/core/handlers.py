@@ -306,6 +306,11 @@ async def _on_leader_change(bot, data):
     if getattr(bot, 'is_in_room', False) or getattr(bot, 'is_joining_room', False):
         return
 
+    if getattr(bot, 'ignore_auto_solo', False):
+        print(f"[{bot.bot_name}] 👑 Auto-Solo ignored because bot is executing command lobby (/5 or /6).")
+        return
+
+
     f2 = get_val(data, "2", {})
     leader_uid = get_val(f2, "1")
     
