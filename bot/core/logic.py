@@ -92,6 +92,8 @@ def load_saved_guild_members(bot_uid):
     except:
         return []
 
+import threading # ফাইলের উপরে এটি যুক্ত আছে ধরে নিলাম
+
 # 🟢 নতুন On-Demand API Sync Logic
 async def fetch_and_sync_all_lists(bot):
     """শুধুমাত্র ইনভাইট পেলে এবং লিস্টে নাম না থাকলেই এই ফাংশনটি কল হবে"""
@@ -120,6 +122,13 @@ async def fetch_and_sync_all_lists(bot):
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump({"Admins": friend_uids}, f, indent=4)
             print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(friend_uids)} Friends.")
+            
+            # 🟢 Cloud Mongo Sync for Admins (Background)
+            try:
+                import mongo_sync
+                admin_data = {"Bot_Name": bot.bot_name, "Guild_ID": str(bot.guild_id), "Admins": friend_uids}
+                threading.Thread(target=mongo_sync.push_admin_to_mongo, args=(bot.bot_name, admin_data)).start()
+            except Exception: pass
 
         # 2. Sync Guild Members
         if bot.guild_id and str(bot.guild_id) not in ["0", "N/A", "None"]:
@@ -145,6 +154,12 @@ async def fetch_and_sync_all_lists(bot):
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump({"members": all_uids}, f, indent=4)
                 print(f"[{bot.bot_name}] ✅ On-Demand Sync: Fetched and Saved {len(all_uids)} Guild members.")
+                
+                # 🟢 Cloud Mongo Sync for Guild Members (Background)
+                try:
+                    import mongo_sync
+                    threading.Thread(target=mongo_sync.push_guild_members_to_mongo, args=(bot.bot_name, bot.my_uid, str(bot.guild_id), all_uids)).start()
+                except Exception: pass
 
     except Exception as e:
         print(f"[{bot.bot_name}] ❌ Error during on-demand sync: {e}")
