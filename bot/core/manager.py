@@ -1,3 +1,4 @@
+# filepath: bot/core/manager.py
 # -*- coding: utf-8 -*-
 # bot/core/manager.py
 
@@ -7,8 +8,6 @@ import time
 import random
 from bot.packets import auth_packets, chat_packets, team_packets
 from bot.core.router import listen_chat, listen_online
-
-# রিকানেক্ট সেশন রিকভারি ইমপোর্ট
 from bot.core.handlers import start_room_chat_auth_sequence
 from utils.helpers import load_bot_room_state
 
@@ -104,13 +103,12 @@ async def manage_chat_connection(bot):
                         bot.room_id = room_id
                         bot.room_secret_code = secret_code
                         bot.is_in_room = True
-                        print(f"[{bot.bot_name}] 🔄 Reconnection detected! Recovering room chat session...")
                         asyncio.create_task(start_room_chat_auth_sequence(bot, room_id, secret_code))
                     
                 await listen_chat(bot, reader)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception:
                 await bot._close_chat_connection()
                 await asyncio.sleep(3)
         await asyncio.sleep(1)
@@ -135,13 +133,11 @@ async def manage_online_connection(bot):
                 await listen_online(bot, reader)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except Exception:
                 bot.online_retries += 1
                 await bot._close_online_connection()
-                
                 if bot.online_retries >= 3:
                     return 
-                    
                 await asyncio.sleep(3)
         await asyncio.sleep(1)
 
@@ -177,16 +173,3 @@ async def heartbeat_loop(bot):
         except Exception: 
             pass
         await asyncio.sleep(15)
-
-async def guild_sync_loop(bot):
-    while bot.is_running:
-        try:
-            if bot.online_connected and bot.guild_id and bot.guild_id != "0" and bot.guild_id != "N/A":
-                from bot.core.logic import update_guild_members_list
-                await update_guild_members_list(bot)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            print(f"[{bot.bot_name}] Guild sync loop error: {e}")
-        # Sleep for 10 minutes (600 seconds)
-        await asyncio.sleep(600)
