@@ -9,7 +9,7 @@ from bot.core.manager import (
     manage_chat_connection, 
     manage_online_connection, 
     heartbeat_loop, 
-    guild_sync_loop,      # 🟢 Added import for background task
+    guild_sync_loop,
     send_online_packet, 
     send_chat_packet, 
     send_chat_message
@@ -41,7 +41,8 @@ class GameBot:
         'last_invite_leader',
         'last_invite_code',
         'last_lobby_session_id',
-        'room_id', 'room_secret_code', 'is_in_room'
+        'room_id', 'room_secret_code', 'is_in_room',
+        'ignore_auto_solo'  # 🟢 slots তালিকায় এই নতুন ভ্যারিয়েবলটি ডিক্লেয়ার করে দেওয়া হলো
     ]
 
     def __init__(self, config, session_data, bot_display_name_from_manager: str):
@@ -55,6 +56,7 @@ class GameBot:
         self.online_retries = 0
         self.lx_burst_running = False 
         self.force_reauth = False
+        self.ignore_auto_solo = False # ডিফল্টভাবে False থাকবে
 
     async def stop(self):
         print(f"[{self.bot_name}] 🛑 Gracefully shutting down...")
@@ -62,7 +64,6 @@ class GameBot:
         try:
             if getattr(self, 'is_in_team', False) and getattr(self, 'online_connected', False) and getattr(self, 'online_writer', None):
                 from bot.packets import team_packets
-                # 🟢 self.key and self.iv are used dynamically
                 leave_pkt = await team_packets.create_leave_team_packet(self.my_uid, self.key, self.iv)
                 self.online_writer.write(leave_pkt)
                 await self.online_writer.drain()
@@ -80,7 +81,18 @@ class GameBot:
             chat_task = asyncio.create_task(manage_chat_connection(self))
             online_task = asyncio.create_task(manage_online_connection(self))
             hb_task = asyncio.create_task(heartbeat_loop(self))
-            guild_task = asyncio.create_task(guild_sync_loop(self))  # 🟢 Added task spawning
+            guild_task = asyncio.create_task(guild_sync_loop(self))
+            
+            # 🟢 বটের নিজস্ব 30-Second Startup Sync Task
+            async def delayed_startup_sync():
+                await asyncio.sleep(30.0) # ঠিক ৩০ সেকেন্ড অপেক্ষা করবে
+                if self.is_running:
+                    print(f"[{self.bot_name}] ⏳ 30s elapsed. Triggering Initial Data Sync...")
+                    from bot.core.logic import update_guild_members_list, sync_friends_to_admins_bot_logic
+                    await update_guild_members_list(self)
+                    await sync_friends_to_admins_bot_logic(self)
+            
+            asyncio.create_task(delayed_startup_sync()) # টাস্কটি ফায়ার করে দেওয়া হলো
             
             try:
                 await online_task 
@@ -91,7 +103,7 @@ class GameBot:
             if not self.is_running: break
             chat_task.cancel()
             hb_task.cancel()
-            guild_task.cancel()  # 🟢 Added task canceling
+            guild_task.cancel()
             
             self.online_connected = False
             self.chat_connected = False
