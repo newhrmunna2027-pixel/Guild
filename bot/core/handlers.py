@@ -187,33 +187,30 @@ async def handle_0500_events(bot, hex_data):
             bot.last_joined_team_code = team_code_val
             
         nested_5 = get_val(packet_json, "5", {})
+        event_action = get_val(packet_json, "4")
+        
         if isinstance(nested_5, dict):
             leader_val = get_val(nested_5, "1")
             if leader_val:
                 bot.last_invite_leader = str(leader_val)
 
-                event_action = get_val(packet_json, "4")
-                nested_data = get_val(packet_json, "5", {})
-
-                if not isinstance(nested_data, dict): return
-
-                if '17' in nested_data and '1' in nested_data:
-                    await _on_chat_code_update(bot, nested_data)
+                if '17' in nested_5 and '1' in nested_5:
+                    await _on_chat_code_update(bot, nested_5)
                     
-                has_leader = ('1' in nested_data or 1 in nested_data)
-                has_invite = ('8' in nested_data or 8 in nested_data)
-                if has_leader and has_invite:
-                    await _on_team_invite(bot, nested_data)
-
-                if event_action == 3: 
-                    await _on_leader_change(bot, nested_data)
-                elif event_action in [6, 22]: 
-                    await _on_member_add(bot, nested_data)
-                elif event_action in [8, 9]: 
-                    await _on_member_leave(bot, nested_data)
-                elif event_action == 10: pass
+                # 🟢 RELIABLE INVITE DETECTION (Event Action 2 or Field 8 presence)
+                has_invite = ('8' in nested_5 or 8 in nested_5)
+                if str(event_action) == "2" or has_invite:
+                    await _on_team_invite(bot, nested_5)
                     
-    except Exception: pass 
+                elif str(event_action) == "3": 
+                    await _on_leader_change(bot, nested_5)
+                elif str(event_action) in ["6", "22"]: 
+                    await _on_member_add(bot, nested_5)
+                elif str(event_action) in ["8", "9"]: 
+                    await _on_member_leave(bot, nested_5)
+                    
+    except Exception as e: 
+        print(f"[{bot.bot_name}] 0500 Event Error: {e}") 
 
 async def delayed_graceful_exit(bot):
     if getattr(bot, 'is_in_room', False) or getattr(bot, 'is_joining_room', False): return
@@ -343,15 +340,14 @@ async def _on_chat_code_update(bot, data):
             auth_pkt = await chat_packets.AuthTeam(bot.current_chat_owner, bot.current_chat_code, bot.key, bot.iv)
             if auth_pkt and await send_chat_packet(bot, auth_pkt): bot.team_chat_authed = True
 
-# 🟢 নতুন On-Demand Lazy Loading Invite Logic
+# 🟢 PERFECTED LAZY-LOADING INVITE DETECTOR
 async def _on_team_invite(bot, data):
     if getattr(bot, 'is_in_room', False) or getattr(bot, 'is_joining_room', False):
         return
 
-    from bot.core.manager import send_online_packet
-    
     leader_val = get_val(data, '1', '')
     leader_uid = "".join(c for c in str(leader_val) if c.isdigit())
+    
     invite_code = str(get_val(data, '8', '')).strip()
     if not invite_code or "_" not in invite_code:
         invite_code = getattr(bot, 'last_invite_code', '').strip()
@@ -361,8 +357,11 @@ async def _on_team_invite(bot, data):
         raw_inviter = leader_uid
     inviter_uid = "".join(c for c in str(raw_inviter) if c.isdigit())
     
+    print(f"[{bot.bot_name}] 📩 Invite received from: {inviter_uid}. Checking authorization...")
+    
     if getattr(bot, 'is_locked', False):
         if not (admin_manager.is_owner(inviter_uid) or inviter_uid in admin_manager.get_admins(bot.my_uid)):
+            print(f"[{bot.bot_name}] 🔒 Bot is locked. Ignoring invite.")
             return 
         else:
             bot.is_locked = False 
@@ -373,9 +372,13 @@ async def _on_team_invite(bot, data):
         if str(val).isdigit():
             potential_uids.append(str(val))
             
+    # 🟢 Safe Guarantee: Ensure inviter_uid is directly checked!
+    if inviter_uid and inviter_uid not in potential_uids:
+        potential_uids.append(inviter_uid)
+            
     should_join = False
     
-    # 1. 1st Check: Current local lists (Super fast, no API)
+    # 1. 1st Check: Current local lists
     for uid in potential_uids:
         if admin_manager.can_auto_join(bot.my_uid, uid):
             should_join = True
@@ -393,7 +396,7 @@ async def _on_team_invite(bot, data):
     # 2. On-Demand API Fetch if not found in local JSONs
     if not should_join:
         from bot.core.logic import fetch_and_sync_all_lists
-        print(f"[{bot.bot_name}] 🔄 UID not found locally. Fetching latest friend & guild lists from Garena API...")
+        print(f"[{bot.bot_name}] 🔄 Target {inviter_uid} not in local lists. Firing On-Demand Garena API Check...")
         await fetch_and_sync_all_lists(bot)
         
         # 3. 2nd Check: Re-evaluate after fetching fresh lists
@@ -413,6 +416,7 @@ async def _on_team_invite(bot, data):
 
     # Finally join if authorized
     if should_join:
+        print(f"[{bot.bot_name}] ✅ Authorized! Accepting invite...")
         if not getattr(bot, 'is_magic_mode', False):
             await bot._close_chat_connection()
             
@@ -430,3 +434,5 @@ async def _on_team_invite(bot, data):
                 from bot.commands.actions_look import equip_random_bundle
                 await equip_random_bundle(bot, None)
         asyncio.create_task(delayed_look_change())
+    else:
+        print(f"[{bot.bot_name}] ❌ Rejected invite from {inviter_uid}. Not Friend/Admin/Guild Member.")
