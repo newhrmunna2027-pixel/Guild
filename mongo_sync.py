@@ -19,21 +19,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
-# 🟢 টার্মাক্স এবং অ্যান্ড্রয়েড এনভায়রনমেন্ট ডিএনএস প্যাচ (resolv.conf ক্র্যাশ এড়াতে)
 import dns.resolver
 try:
-    dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
-    dns.resolver.default_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+    dns.resolver.default_resolver = dns.resolver.Resolver()
+    dns.resolver.default_resolver.nameservers.extend(['8.8.8.8', '1.1.1.1'])
 except Exception as e:
-    pass
+    try:
+        dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+        dns.resolver.default_resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+    except Exception:
+        pass
 
-# Safe PyMono Import
 try:
     from pymongo import MongoClient
 except ImportError:
     print("[!] 'pymongo' is not installed. Please run 'pip install pymongo'")
 
-# Safe Crypto Import for Garena Handshakes
 try:
     from Crypto.Cipher import AES
     from Crypto.Util.Padding import pad, unpad
@@ -44,31 +45,43 @@ except ImportError:
     CRYPTO_AVAILABLE = False
     print("[!] Cryptographic libraries are missing. Run 'pip install pycryptodome aiohttp certifi'")
 
-# 🟢 Garena API ইমপোর্ট লিঙ্ক এবং ফলব্যাক হ্যান্ডলার
 try:
     import garena_api as bot_module
 except ImportError:
-    print("[!] 'garena_api.py' not found in same folder. Local imports might be restricted.")
+    print("[!] 'garena_api.py' not found in same folder.")
 
-# MongoDB Connection String Configuration
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://newhrmunna2027_db_user:munna2288@cluster0.xoaeyib.mongodb.net/?appName=Cluster0")
 
+client = None
+db_mongo = None
+col_system = None
+col_accounts = None
+col_admins = None
+col_friends = None
+col_guild_members = None
+
 try:
-    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db_mongo = client['Esports_Bot_Panel']
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
+    client.admin.command('ping')
+    db_mongo = client['Esports_Bot_Panel_2']
     col_system = db_mongo['system_configs']  
     col_accounts = db_mongo['bot_accounts']  
     col_admins = db_mongo['bot_admins']
     col_friends = db_mongo['bot_friends']
     col_guild_members = db_mongo['guild_members']
+    print("[MONGO] Successfully connected to MongoDB Atlas. Syncing Enabled.")
 except Exception as e:
-    print(f"[MONGO ERROR] Connection Failed: {e}")
+    client = None
+    db_mongo = None
+    col_system = None
+    col_accounts = None
+    col_admins = None
+    col_friends = None
+    col_guild_members = None
+    print(f"[MONGO ERROR] Connection Failed (Running in Offline/Local SQLite Mode): {e}")
 
 DB_PATH = os.path.join(BASE_DIR, 'config', 'database.db')
 
-# ==========================================
-# SQLITE INTERACTIVE FUNCTIONS
-# ==========================================
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -87,152 +100,13 @@ def init_sqlite():
     conn.commit()
     conn.close()
 
-def get_all_active_bots_local():
-    init_sqlite()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # 🟢 ইন-গেম ইউআইডি ওভাররাইটার সেফটি কলাম যুক্ত করা হয়েছে
-    cursor.execute("SELECT name, login_uid, password, ingame_uid FROM bots WHERE login_uid IS NOT NULL AND login_uid != ''")
-    rows = cursor.fetchall()
-    conn.close()
-    return [{"name": r[0], "uid": r[1], "password": r[2], "ingame_uid": r[3]} for r in rows]
-
 # ========================================================
-# 🚀 CORE GARENA API SYNC JOBS (NATIVE INTEGRATION WITH garena_api)
+# 🚀 PULL / PUSH MONGODB FUNCTIONS (Event-Driven)
 # ========================================================
-async def fetch_bot_guild_members(name, bot_uid, bot_pass, ingame_uid=None):
-    """গিল্ড মেম্বারদের লিস্ট সংগ্রহ করে ক্লাউড মঙ্গোডিবি এবং লোকাল ফাইলে সিঙ্ক করার ফাংশন"""
-    try:
-        loop = asyncio.get_event_loop()
-        
-        # ১. সচল টোকেন সংগ্রহ করা
-        token, err = await loop.run_in_executor(None, bot_module.get_token_from_uid_password, bot_uid, bot_pass)
-        if not token:
-            print(f"[!] Guild Sync Failed for {name}: Garena Auth failed: {err}")
-            return
-            
-        # ২. বটের গেম প্রোফাইল থেকে কারেন্ট গিল্ড আইডি বের করা
-        profile_res = await loop.run_in_executor(None, bot_module.get_player_info_detailed, str(bot_uid), token)
-        if not profile_res or not profile_res.get("success"):
-            print(f"[!] Guild Sync Failed for {name}: Could not fetch bot profile.")
-            return
-            
-        clan_id = profile_res.get("clan_id")
-        if not clan_id or clan_id == "N/A" or str(clan_id) == "0":
-            return
-            
-        # ৩. গিল্ডের সমস্ত মেম্বারদের ডাটা ফেচ করা
-        res_guild = await loop.run_in_executor(None, bot_module.get_guild_member_list, token, str(clan_id))
-        if res_guild.get("success"):
-            member_uids = []
-            if res_guild.get("leader") and "uid" in res_guild["leader"]:
-                member_uids.append(str(res_guild["leader"]["uid"]))
-            if res_guild.get("acting_leader") and "uid" in res_guild["acting_leader"]:
-                member_uids.append(str(res_guild["acting_leader"]["uid"]))
-            for officer in res_guild.get("officers", []):
-                if "uid" in officer:
-                    member_uids.append(str(officer["uid"]))
-            for member in res_guild.get("members", []):
-                if "uid" in member:
-                    member_uids.append(str(member["uid"]))
-                
-            if member_uids:
-                # মঙ্গোডিবি ক্লাউড আপডেট
-                col_guild_members.update_one(
-                    {'_id': name},
-                    {'$set': {'clan_id': str(clan_id), 'members': member_uids, 'last_update': time.time()}},
-                    upsert=True
-                )
-                print(f"[✓] Guild members synced to MongoDB for {name}. Total: {len(member_uids)}")
-                
-                # 🟢 লোকাল মেম্বার ফাইল ফুল ওভাররাইট/রিপ্লেস সেফটি প্যাচ
-                try:
-                    file_dir = os.path.join(BASE_DIR, 'config', 'guild_members')
-                    os.makedirs(file_dir, exist_ok=True)
-                    
-                    resolved_uid = ingame_uid or profile_res.get("uid") or bot_uid
-                    clean_uid = "".join(c for c in str(resolved_uid) if c.isdigit())
-                    file_path = os.path.join(file_dir, f"{clean_uid}.json")
-                    
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump({"members": member_uids}, f, indent=4)
-                    print(f"[✓] Guild members saved locally for {name} ({clean_uid}.json). Total: {len(member_uids)}")
-                except Exception as file_err:
-                    print(f"[!] Local file write error in mongo_sync for {name}: {file_err}")
-    except Exception as e:
-        print(f"[!] Guild Sync Exception for {name}: {e}")
-
-async def sync_bot_friends_list(name, bot_uid, bot_pass):
-    """ফ্রেন্ডলিস্ট সংগ্রহ করে ক্লাউড মঙ্গোডিবিতে সিঙ্ক করার ফাংশন"""
-    try:
-        loop = asyncio.get_event_loop()
-        
-        # ১. সচল টোকেন সংগ্রহ করা
-        token, err = await loop.run_in_executor(None, bot_module.get_token_from_uid_password, bot_uid, bot_pass)
-        if not token:
-            print(f"[!] Friends Sync Failed for {name}: Garena Auth failed: {err}")
-            return
-            
-        # ২. ফ্রেন্ডলিস্ট ফেচ এবং মঙ্গোডিবি সিঙ্ক করা
-        res_friends = await loop.run_in_executor(None, bot_module.get_active_friend_list, token)
-        if res_friends.get("success"):
-            friend_uids = [str(f["uid"]) for f in res_friends["friends"]]
-            
-            if friend_uids:
-                col_friends.update_one(
-                    {'_id': name},
-                    {'$set': {'friends': friend_uids, 'last_update': time.time()}},
-                    upsert=True
-                )
-                print(f"[✓] Friends list synced for {name}. Total: {len(friend_uids)}")
-    except Exception as e:
-        print(f"[!] Friends Sync Exception for {name}: {e}")
-
-# ==========================================
-# DYNAMIC BACKGROUND SYNC SCHEDULER
-# ==========================================
-async def sync_all_bots_data_loop():
-    """সকল রানিং বোতের ফ্রেন্ড এবং গিল্ড ডাটা ডাটাবেজে সিঙ্ক করার লুপ"""
-    bots = get_all_active_bots_local()
-    if not bots:
-        return
-        
-    print(f"\n[*] Executing Scheduled Data Sync for {len(bots)} Bots...")
-    for b in bots:
-        try:
-            # 1. Sync Friends List
-            await sync_bot_friends_list(b['name'], b['uid'], b['password'])
-            await asyncio.sleep(1.0)
-            
-            # 2. Sync Guild Members (লোকাল ডাইনামিক ইন-গেম ইউআইডি ওভাররাইটার সহ)
-            await fetch_bot_guild_members(b['name'], b['uid'], b['password'], b.get('ingame_uid'))
-            await asyncio.sleep(1.0)
-        except Exception as e:
-            print(f"[!] Sync error on bot {b['name']}: {e}")
-
-def run_sync_all_bots():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(sync_all_bots_data_loop())
-    loop.close()
-
-def start_auto_sync_scheduler():
-    """১০ মিনিট অন্তর সিঙ্ক করার ব্যাকগ্রাউন্ড শিডিউলার থ্রেড"""
-    def run_schedule():
-        print("[MONGO] Scheduled Sync Daemon Active (10m interval)")
-        while True:
-            try:
-                run_sync_all_bots()
-            except Exception as e:
-                print(f"[!] Scheduler error: {e}")
-            time.sleep(600) # Sleep 10 minutes
-            
-    threading.Thread(target=run_schedule, daemon=True).start()
-
-# ==========================================
-# STANDARD CO-ORDINATOR MIGRATION CODES
-# ==========================================
 def pull_all_from_mongo():
+    if col_system is None or col_accounts is None:
+        print("[MONGO] MongoDB Offline. Skipping Live Sync Pull.")
+        return
     try:
         init_sqlite()
         conn = get_db_connection()
@@ -250,21 +124,29 @@ def pull_all_from_mongo():
             elif filename == 'profile.json':
                 for ingame_uid, pdata in data.items():
                     cursor.execute("INSERT OR REPLACE INTO profiles (ingame_uid, data) VALUES (?, ?)", (ingame_uid, json.dumps(pdata)))
-            elif filename == 'bot_owners.json': bot_owners = data
-            elif filename == 'bot_numbers.json': bot_numbers = data
+            elif filename == 'bot_owners.json': 
+                bot_owners = data
+            elif filename == 'bot_numbers.json': 
+                bot_numbers = data
+            elif filename == 'owner.json':
+                # 🟢 Owner list pulling and saving
+                try:
+                    owner_path = os.path.join(BASE_DIR, 'config', 'owner.json')
+                    os.makedirs(os.path.dirname(owner_path), exist_ok=True)
+                    with open(owner_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=4)
+                except Exception: pass
 
         cursor.execute("SELECT COUNT(*) FROM users")
         if cursor.fetchone()[0] == 0:
             cursor.execute("INSERT INTO users (username, password, role, uid) VALUES (?, ?, ?, ?)", ("owner", "owner", "owner", str(random.randint(10000, 99999))))
 
-        # MongoDB থেকে সক্রিয় বোতের তালিকা সিঙ্ক এবং ফ্যান্টম বট ক্লিয়ারেন্স লুপ
         for doc in col_accounts.find():
             name = doc['_id']
-            
             if not name or str(name).strip().lower() in ['none', 'null', 'undefined', '']:
                 try:
                     col_accounts.delete_one({'_id': name})
-                    col_admins.delete_one({'_id': name})
+                    if col_admins is not None: col_admins.delete_one({'_id': name})
                 except Exception: pass
                 continue 
 
@@ -281,15 +163,46 @@ def pull_all_from_mongo():
             
             cursor.execute("""INSERT OR REPLACE INTO bots (name, login_uid, password, ingame_uid, owner, folder, bot_number) VALUES (?, ?, ?, ?, ?, ?, ?)""", (name, acc.get('uid'), acc.get('password'), existing_uid, creator, folder, b_num))
                 
-        for doc in col_admins.find():
-            name = doc['_id']
-            if not name or str(name).strip().lower() in ['none', 'null', 'undefined', '']:
-                try: col_admins.delete_one({'_id': name})
-                except: pass
-                continue
+        # 🟢 Admin list pulling and saving
+        if col_admins is not None:
+            for doc in col_admins.find():
+                name = doc['_id']
+                if not name or str(name).strip().lower() in ['none', 'null', 'undefined', '']:
+                    try: col_admins.delete_one({'_id': name})
+                    except: pass
+                    continue
+                    
+                data = doc.get('data', {})
                 
-            data = doc.get('data', {})
-            cursor.execute("INSERT OR REPLACE INTO admins (bot_name, guild_id, data) VALUES (?, ?, ?)", (name, str(data.get('Guild_ID', '')), json.dumps(data)))
+                # Update Local SQLite
+                cursor.execute("INSERT OR REPLACE INTO admins (bot_name, guild_id, data) VALUES (?, ?, ?)", (name, str(data.get('Guild_ID', '')), json.dumps(data)))
+                
+                # Update Local JSON
+                cursor.execute("SELECT ingame_uid FROM bots WHERE name=?", (name,))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    uid_str = "".join(c for c in str(row[0]) if c.isdigit())
+                    try:
+                        dir_path = os.path.join(BASE_DIR, 'config', 'admins')
+                        os.makedirs(dir_path, exist_ok=True)
+                        file_path = os.path.join(dir_path, f"{uid_str}.json")
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            json.dump({"Admins": data.get("Admins", [])}, f, indent=4)
+                    except Exception: pass
+
+        # 🟢 Guild Members pulling and saving
+        if col_guild_members is not None:
+            for doc in col_guild_members.find():
+                bot_uid = doc.get('bot_uid')
+                members = doc.get('members', [])
+                if bot_uid:
+                    try:
+                        file_dir = os.path.join(BASE_DIR, 'config', 'guild_members')
+                        os.makedirs(file_dir, exist_ok=True)
+                        file_path = os.path.join(file_dir, f"{bot_uid}.json")
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            json.dump({"members": members}, f, indent=4)
+                    except Exception: pass
             
         cursor.execute("DELETE FROM bots WHERE name IS NULL OR name = '' OR name = 'null' OR name = 'None' OR name = 'undefined'")
                            
@@ -299,22 +212,27 @@ def pull_all_from_mongo():
         print(f"[SYNC ERROR] {e}")
 
 def start_change_stream():
+    if client is None:
+        return
     def watch_db():
         print("[MONGO] Live Sync Started. Listening for changes...")
         while True:
             try:
+                if client is None:
+                    time.sleep(5)
+                    continue
                 pipeline = [{"$match": {"operationType": {"$in": ["insert", "update", "replace", "delete"]}}}]
                 with client.watch(pipeline) as stream:
                     for change in stream:
-                        print("[MONGO] Change detected in Web Panel! Syncing Local DB...")
                         pull_all_from_mongo()
             except Exception as e:
-                print(f"[MONGO] Sync Stream Disconnected, reconnecting in 5s... Error: {e}")
                 time.sleep(5)
                 
     threading.Thread(target=watch_db, daemon=True).start()
 
+# 🟢 PUSH FUNCTIONS (Called manually when data changes)
 def push_user_to_mongo():
+    if col_system is None: return
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT username, password, role, uid FROM users")
@@ -324,6 +242,7 @@ def push_user_to_mongo():
     except: pass
 
 def push_profile_to_mongo():
+    if col_system is None: return
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT ingame_uid, data FROM profiles")
@@ -333,6 +252,7 @@ def push_profile_to_mongo():
     except: pass
 
 def push_bot_to_mongo(name, login_uid, password, owner, folder, bot_number):
+    if col_accounts is None or col_system is None: return
     if not name or str(name).strip().lower() in ['none', 'null', 'undefined', '']: return
     try:
         col_accounts.update_one({'_id': name}, {'$set': {'data': {"account": {"uid": login_uid, "password": password}}}}, upsert=True)
@@ -341,7 +261,6 @@ def push_bot_to_mongo(name, login_uid, password, owner, folder, bot_number):
         cursor.execute("SELECT name, owner, folder FROM bots WHERE name IS NOT NULL AND name != ''")
         owners_data = {row[0]: {"creator": row[1], "folder": row[2]} for row in cursor.fetchall()}
         col_system.update_one({'_id': 'bot_owners.json'}, {'$set': {'data': owners_data}}, upsert=True)
-        
         cursor.execute("SELECT name, bot_number FROM bots WHERE name IS NOT NULL AND name != ''")
         numbers_data = {row[0]: row[1] for row in cursor.fetchall()}
         col_system.update_one({'_id': 'bot_numbers.json'}, {'$set': {'data': numbers_data}}, upsert=True)
@@ -349,14 +268,36 @@ def push_bot_to_mongo(name, login_uid, password, owner, folder, bot_number):
     except: pass
 
 def push_admin_to_mongo(name, admin_data):
+    if col_admins is None: return
     if not name or str(name).strip().lower() in ['none', 'null', 'undefined', '']: return
     try: col_admins.update_one({'_id': name}, {'$set': {'data': admin_data}}, upsert=True)
     except Exception as e: print(f"[MONGO ERROR] {e}")
 
+def push_guild_members_to_mongo(bot_name, bot_uid, clan_id, members_list):
+    if col_guild_members is None: return
+    try:
+        col_guild_members.update_one(
+            {'_id': bot_name},
+            {'$set': {'bot_uid': str(bot_uid), 'clan_id': str(clan_id), 'members': members_list, 'last_update': time.time()}},
+            upsert=True
+        )
+    except Exception as e: pass
+
+def push_owner_to_mongo():
+    if col_system is None: return
+    try:
+        owner_path = os.path.join(BASE_DIR, 'config', 'owner.json')
+        if os.path.exists(owner_path):
+            with open(owner_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            col_system.update_one({'_id': 'owner.json'}, {'$set': {'data': data}}, upsert=True)
+    except Exception as e: print(f"[MONGO ERROR] Owner Push Error: {e}")
+
 def delete_bot_from_mongo(name):
+    if col_accounts is None or col_system is None: return
     try: 
         col_accounts.delete_one({'_id': name})
-        col_admins.delete_one({'_id': name})
+        if col_admins is not None: col_admins.delete_one({'_id': name})
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name, owner, folder FROM bots WHERE name IS NOT NULL AND name != ''")
@@ -369,16 +310,18 @@ def delete_bot_from_mongo(name):
     except: pass
 
 def rename_bot_in_mongo(old_name, new_name):
+    if col_accounts is None or col_system is None: return
     if not new_name or str(new_name).strip().lower() in ['none', 'null', 'undefined', '']: return
     try:
         doc = col_accounts.find_one({'_id': old_name})
         if doc:
             col_accounts.insert_one({'_id': new_name, 'data': doc['data']})
             col_accounts.delete_one({'_id': old_name})
-        admin_doc = col_admins.find_one({'_id': old_name})
-        if admin_doc:
-            col_admins.insert_one({'_id': new_name, 'data': admin_doc['data']})
-            col_admins.delete_one({'_id': old_name})
+        if col_admins is not None:
+            admin_doc = col_admins.find_one({'_id': old_name})
+            if admin_doc:
+                col_admins.insert_one({'_id': new_name, 'data': admin_doc['data']})
+                col_admins.delete_one({'_id': old_name})
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name, owner, folder FROM bots WHERE name IS NOT NULL AND name != ''")
@@ -390,9 +333,7 @@ def rename_bot_in_mongo(old_name, new_name):
         conn.close()
     except: pass
 
-# Automatically sync on startup
 pull_all_from_mongo()
 start_change_stream()
-start_auto_sync_scheduler()
 
 # END OF FILE mongo_sync.py
