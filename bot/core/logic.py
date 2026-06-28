@@ -53,7 +53,7 @@ async def execute_solo_logic(bot):
         bot.is_magic_mode = False
         
     bot.is_locked = False
-    bot.ignore_auto_solo = False 
+    bot.ignore_auto_solo = False # 🟢 বট সোলো হওয়ার সাথে সাথে ফ্ল্যাগটি রিসেট হবে
     
     if bot.is_in_team:
         leave_pkt = await team_packets.create_leave_team_packet(bot.my_uid, bot.key, bot.iv)
@@ -94,15 +94,13 @@ def load_saved_guild_members(bot_uid):
         return []
 
 async def update_guild_members_list(bot):
-    """১০ মিনিট পর পর গ্যারেনা থেকে গিল্ড মেম্বারদের রিয়েল-টাইম ডাটা এনে ফাইলে সেভ করার ফাংশন"""
-    # 🟢 Safety Check: গিল্ড আইডি না থাকলে বা 0 হলে রিটার্ন করবে
+    """১০ মিনিট পর পর বা স্টার্টআপে গ্যারেনা থেকে গিল্ড মেম্বারদের রিয়েল-টাইম ডাটা এনে ফাইলে সেভ করার ফাংশন"""
     if not bot.guild_id or str(bot.guild_id) in ["0", "N/A", "None"]:
         return
         
     try:
         import garena_api as bot_module
         
-        # ১. বটের একটি সচল টোকেন নিয়ে আসা (কনফিগ নাম ট্র্যাকিং সহ)
         config_name = getattr(bot, 'bot_display_name_from_manager', bot.bot_name)
         token, err = bot_module.get_active_token(config_name)
         
@@ -110,12 +108,10 @@ async def update_guild_members_list(bot):
             print(f"[{bot.bot_name}] Sync Failed: Garena Token unavailable for session '{config_name}'.")
             return
             
-        # ২. গ্যারেনা থেকে রিয়েল-টাইম মেম্বার লিস্ট সংগ্রহ করা
         loop = asyncio.get_running_loop()
         res = await loop.run_in_executor(None, bot_module.get_guild_member_list, token, str(bot.guild_id))
         
         if res.get("success"):
-            # ৩. মেম্বারদের সমস্ত UIDs সংগ্রহ করা
             all_uids = []
             if res.get("leader") and "uid" in res["leader"]:
                 all_uids.append(str(res["leader"]["uid"]))
@@ -128,11 +124,9 @@ async def update_guild_members_list(bot):
                 if "uid" in member:
                     all_uids.append(str(member["uid"]))
                     
-            # ৪. ফোল্ডার এবং ফাইল তৈরি করে JSON সেভ করা
             file_dir = os.path.join('config', 'guild_members')
             os.makedirs(file_dir, exist_ok=True)
             
-            # ফাইলের নামের ক্ষেত্রে সেফটি যুক্ত করা হলো (শুধুমাত্র সংখ্যা সাপোর্ট করবে)
             uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
             file_path = os.path.join(file_dir, f"{uid_str}.json")
             
@@ -145,3 +139,37 @@ async def update_guild_members_list(bot):
             
     except Exception as e:
         print(f"[{bot.bot_name}] ❌ Error updating guild members: {e}")
+
+async def sync_friends_to_admins_bot_logic(bot):
+    """বট লগইন হওয়ার পর ফ্রেন্ডলিস্ট এনে সরাসরি অ্যাডমিন ফাইলে সেভ করার ফাংশন"""
+    try:
+        import garena_api as bot_module
+        
+        config_name = getattr(bot, 'bot_display_name_from_manager', bot.bot_name)
+        token, err = bot_module.get_active_token(config_name)
+        
+        if err or not token:
+            print(f"[{bot.bot_name}] Sync Failed: Token unavailable for friends sync.")
+            return
+            
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(None, bot_module.get_active_friend_list, token)
+        
+        if res.get("success"):
+            friend_uids = [str(f["uid"]) for f in res["friends"] if str(f["uid"]) != str(bot.my_uid)]
+            
+            dir_path = os.path.join('config', 'admins')
+            os.makedirs(dir_path, exist_ok=True)
+            
+            uid_str = "".join(c for c in str(bot.my_uid) if c.isdigit())
+            file_path = os.path.join(dir_path, f"{uid_str}.json")
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump({"Admins": friend_uids}, f, indent=4)
+                
+            print(f"[{bot.bot_name}] ✅ Auto-Synced {len(friend_uids)} Friends to Admin list.")
+        else:
+            print(f"[{bot.bot_name}] ⚠️ Friends Sync Failed: {res.get('message', 'Unknown Error')}")
+            
+    except Exception as e:
+        print(f"[{bot.bot_name}] ❌ Error updating friends to admins: {e}")
